@@ -1,6 +1,6 @@
 # frostract
 
-frostract is a utility for extracting files from Frostpunk idx and dat archives. 
+frostract is a utility for extracting files from Frostpunk idx and dat archives. Just put the built executable in the same directory as your .dat and .idx files that you want to extract, and it'll do the rest.
 
 Usage: frostract [flags]
 
