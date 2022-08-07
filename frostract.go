@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"flag"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -19,6 +18,8 @@ import (
 	"github.com/Mystik738/frostexture"
 	"github.com/Mystik738/frostlang"
 	"github.com/aviddiviner/go-murmur"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const bytesPerFile = 29
@@ -39,6 +40,8 @@ func main() {
 }
 
 func Frostract(overwrite, help, dds, png, pre121, langToJSON bool) {
+	log.SetLevel(log.DebugLevel)
+
 	if help {
 		helptext := `frostract is a utility for extracting files from Frostpunk idx and dat archives. Requires magick to be installed to convert dds to png. FPHook.log must be in same directory for filename lookup.
 Usage: frostract [flags]
@@ -51,13 +54,14 @@ Flags:
  -o		Overwrite existing files
  -v		Idx is from before version 1.2.1`
 
-		fmt.Println(helptext)
+		log.Info(helptext)
 	} else {
 		startTime := time.Now()
 		dir, err := os.Getwd()
 		//This is more a heuristic value to increase efficiency rather than an exact science
 		concurrency := 8
 		checkError(err)
+		log.Debugf("Working directory is %v", dir)
 		//Make our hashmap
 		hashToFileName := make(map[string]string)
 		lineCounts := make(map[string]int)
@@ -103,25 +107,27 @@ Flags:
 				f.Close()
 			}
 
+			log.Debugf("FPHook.log has %v lines.", len(lineCounts))
+
 			f.Close()
 		} else {
-			fmt.Println("FPHook.log does not exist in current directory, cannot adjust filenames")
+			log.Warn("FPHook.log does not exist in current directory, cannot adjust filenames")
 		}
 
 		//Walk our current path to get idx files
 		files := make([]string, 0)
-		err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if info.IsDir() {
-				return nil
+		allFiles, err := ioutil.ReadDir(dir)
+		checkError(err)
+		for _, info := range allFiles {
+			log.Debugf("Investigating %v", info.Name())
+			if !info.IsDir() && filepath.Ext(info.Name()) == ".idx" {
+				log.Debugf("Adding %v", info.Name())
+				files = append(files, info.Name())
 			}
-			if filepath.Ext(path) != ".idx" {
-				return nil
-			}
-			files = append(files, info.Name())
-			return nil
-		})
+		}
+		checkError(err)
 		for _, idxFileName := range files {
-			fmt.Println("Extracting", idxFileName)
+			log.Infof("Extracting %v", idxFileName)
 			dirName := idxFileName[:strings.Index(idxFileName, ".")]
 			datFileName := dirName + ".dat"
 			if _, err := os.Stat(dirName); os.IsNotExist(err) {
@@ -166,7 +172,7 @@ Flags:
 								datFile.ReadAt(bytesRead, int64(offset))
 								b := bytes.NewReader(bytesRead)
 								r, err := gzip.NewReader(b)
-								fmt.Println(fileName)
+								log.Info(fileName)
 								if err == nil {
 									io.Copy(outFile, r)
 									r.Close()
@@ -225,7 +231,7 @@ Flags:
 					}(hash, compressed, uncompressed, offset, isCompressed)
 				}
 			} else {
-				fmt.Println("Content size doesn't match data type")
+				log.Error("Content size doesn't match data type")
 
 				return
 			}
@@ -236,21 +242,21 @@ Flags:
 		}
 
 		if !langToJSON {
-			fmt.Println("Converting Lang files to JSON")
+			log.Info("Converting Lang files to JSON")
 			frostlang.ConvertLangToJSON(dir+"/localizations/", overwrite)
 		}
 
 		if !dds {
 			if !png {
-				fmt.Println("Repairing DDS files and creating PNGs")
+				log.Info("Repairing DDS files and creating PNGs")
 				frostexture.ConvertToDDSandPNG(dir+"/textures-s3/", overwrite, true)
 			} else {
-				fmt.Println("Repairing DDS files")
+				log.Info("Repairing DDS files")
 				frostexture.ConvertToDDSandPNG(dir+"/textures-s3/", overwrite, false)
 			}
 		}
 
-		fmt.Println("Process ran in ", time.Now().Sub(startTime))
+		log.Info("Process ran in ", time.Since(startTime))
 	}
 }
 
