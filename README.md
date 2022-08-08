@@ -18,6 +18,8 @@ Flags:
  
  -v		Idx is from before version 1.2.1
 
+ -c     Instead of extracting, compress existing subdirectories and idx files into new idx and dat files
+
 ## Build
 
 go get
