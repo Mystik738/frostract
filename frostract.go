@@ -24,7 +24,7 @@ import (
 
 const bytesPerFile = 29
 const oldBytesPerFile = 17
-const fphook = "FPHook.log"
+const fphookFileName = "FPHook.log"
 
 func main() {
 	log.SetLevel(log.InfoLevel)
@@ -413,17 +413,29 @@ func checkError(err error) {
 	}
 }
 
-//Read in FPHook to a map
+// Read in FPHook to a map
 func readFPHook(hashToFile bool) map[string]string {
+	var err error
 	dir, err := os.Getwd()
 	checkError(err)
-	_, err = os.Stat(filepath.Join(dir, fphook))
+	// first, look for FPHook in the working directory
+	fphookFilePath := filepath.Join(dir, fphookFileName)
+	_, err = os.Stat(fphookFilePath)
+	if os.IsNotExist(err) {
+		// next, look for FPHook in the directory with the frostract binary
+		// TODO handle symlinks
+		var execFileName string
+		execFileName, err = os.Executable()
+		checkError(err)
+		fphookFilePath = filepath.Join(filepath.Dir(execFileName), fphookFileName)
+		_, err = os.Stat(fphookFilePath)
+	}
 
 	fpmap := make(map[string]string)
 	lineCounts := make(map[string]int)
 	if !os.IsNotExist(err) {
 		//Get our FPHook file to get hashes
-		f, err := os.Open(filepath.Join(dir, fphook))
+		f, err := os.Open(fphookFilePath)
 		checkError(err)
 		r := bufio.NewReader(f)
 		lineCount := 0
@@ -451,7 +463,8 @@ func readFPHook(hashToFile bool) map[string]string {
 		f.Close()
 		//This is just to trim out duplicates, maybe flag to turn off
 		if len(lineCounts) < lineCount {
-			f, err = os.Create(filepath.Join(dir, fphook))
+			// TODO handle FPHook file is not writable
+			f, err = os.Create(filepath.Join(dir, fphookFileName))
 			checkError(err)
 
 			keys := make([]string, 0, len(lineCounts))
