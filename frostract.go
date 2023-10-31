@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"flag"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,38 +35,37 @@ func main() {
 	pre121 := flag.Bool("v", false, "Idx is from before version 1.2.1")
 	langToJSON := flag.Bool("j", false, "Skip converting lang files to json")
 	compress := flag.Bool("c", false, "Instead of extracting, compress existing subdirectories and idx files into new idx and dat files")
+	files := flag.String("f", "", "File(s) to extract or directories to compress")
 
 	flag.Parse()
 
 	if !*compress {
-		Frostract(*overwrite, *help, *dds, *png, *pre121, *langToJSON)
+		Frostract(*overwrite, *help, *dds, *png, *pre121, *langToJSON, *files)
 	} else {
-		Frostpress(*overwrite, *pre121)
+		Frostpress(*overwrite, *pre121, *files)
 	}
 }
 
-//Frostpress compresses a directory into a dat and .idx file
-func Frostpress(overwrite, pre121 bool) {
+// Frostpress compresses a directory into a dat and .idx file
+func Frostpress(overwrite, pre121 bool, filespec string) {
 	parentDir, err := os.Getwd()
 	checkError(err)
 
 	//Get all directories that are children of the current directory
+	if filespec == "" {
+		filespec = "*"
+	}
+	files, err := filepath.Glob(filespec)
+	checkError(err)
 	var dirs []string
-	filepath.Walk(parentDir, func(path string, info os.FileInfo, err error) error {
-		if info.IsDir() && string(info.Name()[0]) == "." {
-			return filepath.SkipDir
+	for _, file := range files {
+		info, err := os.Stat(file)
+		checkError(err)
+		if info.IsDir() {
+			dirs = append(dirs, file)
+			log.Debugf("Adding %v", info.Name())
 		}
-		if !info.IsDir() {
-			return nil
-		}
-
-		dirs = append(dirs, info.Name())
-		log.Debugf("Adding %v", info.Name())
-		return nil
-	})
-
-	//remove parent dir from walk
-	dirs = dirs[1:]
+	}
 
 	//get our hashes
 	hashToFileName := readFPHook(true)
@@ -107,7 +105,7 @@ func Frostpress(overwrite, pre121 bool) {
 		}
 
 		//We should keep the dat file in the same order as the original, but do we need to?
-		content, err := ioutil.ReadFile(idxFileName)
+		content, err := os.ReadFile(idxFileName)
 		checkError(err)
 		content = content[11:]
 		offsetToHash := make(map[uint64]string)
@@ -116,7 +114,7 @@ func Frostpress(overwrite, pre121 bool) {
 			hash := content[i : i+4]
 			offsetToHash[binary.LittleEndian.Uint64(content[i+20:i+28])] = hex.EncodeToString(hash)
 		}
-		log.Debug("OffsetsToHash: %v", offsetToHash)
+		log.Debugf("OffsetsToHash: %v", offsetToHash)
 
 		offsetOrder := make(map[uint64]string, 0)
 		offsets := make([]uint64, 0)
@@ -157,7 +155,7 @@ func Frostpress(overwrite, pre121 bool) {
 			checkError(err)
 
 			//Write to a temporary gz file. Without this, gzip doesn't close the file correctly.
-			data, err := ioutil.ReadFile(fileName)
+			data, err := os.ReadFile(fileName)
 			checkError(err)
 			tmp, err := os.OpenFile(tmpFileName, os.O_WRONLY|os.O_CREATE, 0660)
 			checkError(err)
@@ -172,7 +170,7 @@ func Frostpress(overwrite, pre121 bool) {
 			tmp.Close()
 
 			//Read from our temp file and move the data into the .dat
-			data, err = ioutil.ReadFile(tmpFileName)
+			data, err = os.ReadFile(tmpFileName)
 			checkError(err)
 			dat, err := os.OpenFile(datName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0660)
 			checkError(err)
@@ -227,12 +225,12 @@ func Frostpress(overwrite, pre121 bool) {
 	}
 }
 
-func Frostract(overwrite, help, dds, png, pre121, langToJSON bool) {
-	log.SetLevel(log.DebugLevel)
+func Frostract(overwrite, help, dds, png, pre121, langToJSON bool, filespec string) {
+	log.SetLevel(log.InfoLevel)
 
 	if help {
 		helptext := `frostract is a utility for extracting files from Frostpunk idx and dat archives. Requires magick to be installed to convert dds to png. FPHook.log must be in same directory for filename lookup.
-Usage: frostract [flags]
+Usage: frostract [flags] [options]
 
 Flags:
  -h		Display this help
@@ -241,8 +239,11 @@ Flags:
  -j		Skip converting lang files to json
  -o		Overwrite existing files
  -v		Idx is from before version 1.2.1
- -c     Instead of extracting, compress existing subdirectories and idx files into new idx and dat files`
+ -c     Instead of extracting, compress existing subdirectories and idx files into new idx and dat files
 
+Options:
+ -f <filespec>     Extract specific idx files or compress specific directories
+`
 		log.Info(helptext)
 	} else {
 		startTime := time.Now()
@@ -255,26 +256,34 @@ Flags:
 		hashToFileName := readFPHook(true)
 
 		//Walk our current path to get idx files
-		files := make([]string, 0)
-		allFiles, err := ioutil.ReadDir(dir)
+		if filespec == "" {
+			filespec = "*.idx"
+		}
+		files, err := filepath.Glob(filespec)
 		checkError(err)
-		for _, info := range allFiles {
-			if !info.IsDir() && filepath.Ext(info.Name()) == ".idx" {
-				log.Debugf("Adding %v", info.Name())
-				files = append(files, info.Name())
+		var matchingFiles []string
+		for _, file := range files {
+			info, err := os.Stat(file)
+			checkError(err)
+			if !info.IsDir() && filepath.Ext(file) == ".idx" {
+				log.Debugf("Adding %v", file)
+				matchingFiles = append(matchingFiles, file)
 			}
 		}
-		checkError(err)
-		for _, idxFileName := range files {
+		for _, idxFileName := range matchingFiles {
 			log.Infof("Extracting %v", idxFileName)
-			dirName := idxFileName[:strings.Index(idxFileName, ".")]
-			datFileName := dirName + ".dat"
-			if _, err := os.Stat(dirName); os.IsNotExist(err) {
-				err := os.Mkdir(dirName, 0777)
+			parentDirName := filepath.Dir(idxFileName)
+			baseName := filepath.Base(idxFileName)
+			stemName := baseName[:len(baseName)-len(filepath.Ext(baseName))]
+			datFileName := filepath.Join(parentDirName, stemName+".dat")
+			if _, err := os.Stat(stemName); os.IsNotExist(err) {
+				wdirStat, err := os.Stat(dir)
+				checkError(err)
+				err = os.Mkdir(stemName, wdirStat.Mode())
 				checkError(err)
 			}
 			//Read in the whole idx file so we can determine number of files in archive
-			content, err := ioutil.ReadFile(idxFileName)
+			content, err := os.ReadFile(idxFileName)
 			checkError(err)
 			//Just open a pointer to the dat file so we can read subsections later
 			datFile, err := os.Open(datFileName)
@@ -304,8 +313,9 @@ Flags:
 						if _, ok := hashToFileName[fileName]; ok {
 							fileName = hashToFileName[fileName]
 						}
-						if _, err := os.Stat(dirName + "/" + fileName); overwrite || err != nil {
-							outFile, err := os.Create(dirName + "/" + fileName)
+						filePath := filepath.Join(stemName, fileName)
+						if _, err := os.Stat(filePath); overwrite || err != nil {
+							outFile, err := os.Create(filePath)
 							checkError(err)
 							bytesToRead := compressed
 							//If the file is compressed, decompress using gzip
@@ -350,8 +360,9 @@ Flags:
 						if _, ok := hashToFileName[fileName]; ok {
 							fileName = hashToFileName[fileName]
 						}
-						if _, err := os.Stat(dirName + "/" + fileName); overwrite || err != nil {
-							outFile, err := os.Create(dirName + "/" + fileName)
+						filePath := filepath.Join(stemName, fileName)
+						if _, err := os.Stat(filePath); overwrite || err != nil {
+							outFile, err := os.Create(filePath)
 							checkError(err)
 							bytesToRead := compressed
 							bytesRead := make([]byte, bytesToRead)
@@ -405,7 +416,7 @@ Flags:
 	}
 }
 
-//Simple function to panic if there's an error
+// Simple function to panic if there's an error
 func checkError(err error) {
 	if err != nil {
 		log.Panic(err)
