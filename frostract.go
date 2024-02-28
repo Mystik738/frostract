@@ -90,23 +90,29 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 
 		log.Infof("Compressing %v directory", dir)
 		idxFileName := filepath.Join(parentDir, dir+".idx")
-		newIdxFileName := filepath.Join(parentDir, dir+"_new.idx")
-		datName := filepath.Join(parentDir, dir+"_new.dat")
+		datName := filepath.Join(parentDir, dir+".dat")
+
+		//We should keep the dat file in the same order as the original, but do we need to?
+		content, err := os.ReadFile(idxFileName)
+		if err != nil {
+			log.Infof("%v does not exist, skipping directory %v", idxFileName, dir)
+			continue
+		}
 
 		//We don't want to overwrite existing files unless the overwrite flag is set
-		if _, err := os.Stat(newIdxFileName); overwrite || err != nil {
+		if _, err := os.Stat(idxFileName); overwrite || err != nil {
 
 		} else {
-			log.Fatalf("%v already exists", newIdxFileName)
+			log.Fatalf("%v already exists, must flag overwrite", idxFileName)
 		}
 		if _, err := os.Stat(datName); overwrite || err != nil {
+			fh, err := os.Create(datName)
+			checkError(err)
+			fh.Close()
 		} else {
 			log.Fatalf("%v already exists", datName)
 		}
 
-		//We should keep the dat file in the same order as the original, but do we need to?
-		content, err := os.ReadFile(idxFileName)
-		checkError(err)
 		content = content[11:]
 		offsetToHash := make(map[uint64]string)
 		for i := 0; i < len(content); i += bytesPerFile {
@@ -159,7 +165,7 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 			checkError(err)
 			tmp, err := os.OpenFile(tmpFileName, os.O_WRONLY|os.O_CREATE, 0660)
 			checkError(err)
-			gzdat, err := gzip.NewWriterLevel(tmp, gzip.DefaultCompression)
+			gzdat, err := gzip.NewWriterLevel(tmp, gzip.BestCompression)
 			checkError(err)
 			gzdat.Header.OS = byte(0)
 			fw := bufio.NewWriter(gzdat)
@@ -200,11 +206,11 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 			binary.LittleEndian.PutUint64(writeOffset, uint64(offset))
 			hashInfo[stringHash] = append(hashInfo[stringHash], writeOffset...)
 
-			offset += int(compressed)
+			offset = int(datinfo.Size())
 		}
 
 		//idx written in original order
-		idx, err := os.Create(newIdxFileName)
+		idx, err := os.Create(idxFileName)
 		checkError(err)
 		defer idx.Close()
 
