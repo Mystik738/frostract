@@ -209,6 +209,8 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 			offset = int(datinfo.Size())
 		}
 
+		log.Debugf("Compressed %d files", len(orderedHashes))
+
 		//idx written in original order
 		idx, err := os.Create(idxFileName)
 		checkError(err)
@@ -219,7 +221,7 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 		checkError(err)
 		idx.Write(idxHeader)
 		headerContent := make([]byte, 8)
-		binary.LittleEndian.PutUint64(headerContent, uint64(len(files)))
+		binary.LittleEndian.PutUint64(headerContent, uint64(len(content)/bytesPerFile))
 		idx.Write(headerContent)
 
 		for i := 0; i < len(content); i += bytesPerFile {
@@ -227,13 +229,14 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 			isCompressed := content[i+28]
 			hashInfo[hash] = append(hashInfo[hash], isCompressed)
 			idx.Write(hashInfo[hash])
+			log.Debugf("%v\n", hashInfo[hash])
 		}
+
+		log.Debugf("Indexed %d files", len(content)/bytesPerFile)
 	}
 }
 
 func Frostract(overwrite, help, dds, png, pre121, langToJSON bool, filespec string) {
-	log.SetLevel(log.InfoLevel)
-
 	if help {
 		helptext := `frostract is a utility for extracting files from Frostpunk idx and dat archives. Requires magick to be installed to convert dds to png. FPHook.log must be in same directory for filename lookup.
 Usage: frostract [flags] [options]
@@ -401,6 +404,8 @@ Options:
 			for i := 0; i < cap(sem); i++ {
 				sem <- true
 			}
+
+			log.Debugf("Extracted %d files", len(content)/bytesPerFile)
 		}
 
 		if !langToJSON {
