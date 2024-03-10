@@ -8,10 +8,10 @@ import (
 	"encoding/hex"
 	"flag"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/Mystik738/frostexture"
@@ -120,7 +120,7 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 			hash := content[i : i+4]
 			offsetToHash[binary.LittleEndian.Uint64(content[i+20:i+28])] = hex.EncodeToString(hash)
 		}
-		log.Debugf("OffsetsToHash: %v", offsetToHash)
+		//log.Debugf("OffsetsToHash: %v", offsetToHash)
 
 		offsetOrder := make(map[uint64]string, 0)
 		offsets := make([]uint64, 0)
@@ -134,8 +134,8 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 		}
 
 		sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
-		log.Debugf("Offsets: %v", offsets)
-		log.Debugf("OffsetsOrder: %v", offsetOrder)
+		//log.Debugf("Offsets: %v", offsets)
+		//log.Debugf("OffsetsOrder: %v", offsetOrder)
 		orderedHashes := make([][]byte, 0)
 
 		for _, offset := range offsets {
@@ -147,6 +147,8 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 		offset := 0
 
 		hashInfo := make(map[string][]byte, 0)
+
+		log.Debugf("There are %d hashes in the list", len(orderedHashes))
 
 		for _, hash := range orderedHashes {
 			file, ok := hashToFileName[hex.EncodeToString(hash)]
@@ -193,7 +195,7 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 
 			//store the file information in a map
 			stringHash := hex.EncodeToString(hash)
-			log.Debugf("%v %v %v %v\n", stringHash, offset, compressed, uncompressed)
+			//log.Debugf("%v %v %v %v\n", stringHash, offset, compressed, uncompressed)
 			writeByte := hash
 			hashInfo[stringHash] = writeByte
 			writeCompressed := make([]byte, 8)
@@ -209,7 +211,7 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 			offset = int(datinfo.Size())
 		}
 
-		log.Debugf("Compressed %d files", len(orderedHashes))
+		log.Infof("Compressed %d files", len(orderedHashes))
 
 		//idx written in original order
 		idx, err := os.Create(idxFileName)
@@ -229,10 +231,10 @@ func Frostpress(overwrite, pre121 bool, filespec string) {
 			isCompressed := content[i+28]
 			hashInfo[hash] = append(hashInfo[hash], isCompressed)
 			idx.Write(hashInfo[hash])
-			log.Debugf("%v\n", hashInfo[hash])
+			log.Debugf("%v\n", hex.EncodeToString(hashInfo[hash]))
 		}
 
-		log.Debugf("Indexed %d files", len(content)/bytesPerFile)
+		log.Infof("Indexed %d files", len(content)/bytesPerFile)
 	}
 }
 
@@ -324,6 +326,9 @@ Options:
 						}
 						filePath := filepath.Join(stemName, fileName)
 						if _, err := os.Stat(filePath); overwrite || err != nil {
+							dirPath := filepath.Dir(filePath)
+							err := os.MkdirAll(dirPath, os.ModePerm)
+							checkError(err)
 							outFile, err := os.Create(filePath)
 							checkError(err)
 							bytesToRead := compressed
@@ -371,6 +376,9 @@ Options:
 						}
 						filePath := filepath.Join(stemName, fileName)
 						if _, err := os.Stat(filePath); overwrite || err != nil {
+							dirPath := filepath.Dir(filePath)
+							err := os.MkdirAll(dirPath, os.ModePerm)
+							checkError(err)
 							outFile, err := os.Create(filePath)
 							checkError(err)
 							bytesToRead := compressed
@@ -414,13 +422,20 @@ Options:
 		}
 
 		if !dds {
+			createPng := true
 			if !png {
 				log.Info("Repairing DDS files and creating PNGs")
-				frostexture.ConvertToDDSandPNG(dir+"/textures-s3/", overwrite, true)
 			} else {
 				log.Info("Repairing DDS files")
-				frostexture.ConvertToDDSandPNG(dir+"/textures-s3/", overwrite, false)
+				createPng = false
 			}
+			err := filepath.WalkDir(dir+"/textures-s3/", func(path string, d fs.DirEntry, err error) error {
+				if d.IsDir() {
+					frostexture.ConvertToDDSandPNG(path, overwrite, createPng)
+				}
+				return nil
+			})
+			checkError(err)
 		}
 
 		log.Info("Process ran in ", time.Since(startTime))
@@ -467,12 +482,16 @@ func readFPHook(hashToFile bool) map[string]string {
 			if err != nil || isPrefix {
 				break
 			}
-			splits := strings.Split(string(line), "/")
-			fileName := splits[len(splits)-1]
+			fileName := string(line)
 			b := make([]byte, 4)
 			binary.LittleEndian.PutUint32(b, murmur.MurmurHash2([]byte(line), 0))
 			if hashToFile {
-				fpmap[hex.EncodeToString(b)] = fileName
+				_, ok := fpmap[hex.EncodeToString(b)]
+				if !ok {
+					fpmap[hex.EncodeToString(b)] = fileName
+				} else {
+					log.Warnf("Duplicate hash %v and %v", string(line), fpmap[hex.EncodeToString(b)])
+				}
 			} else {
 				fpmap[fileName] = hex.EncodeToString(b)
 			}
