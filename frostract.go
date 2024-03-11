@@ -429,13 +429,15 @@ Options:
 				log.Info("Repairing DDS files")
 				createPng = false
 			}
-			err := filepath.WalkDir(dir+"/textures-s3/", func(path string, d fs.DirEntry, err error) error {
-				if d.IsDir() {
-					frostexture.ConvertToDDSandPNG(path, overwrite, createPng)
-				}
-				return nil
-			})
-			checkError(err)
+			if _, err := os.Stat(dir + "/textures-s3/"); err == nil {
+				err := filepath.WalkDir(dir+"/textures-s3/", func(path string, d fs.DirEntry, err error) error {
+					if d.IsDir() {
+						frostexture.ConvertToDDSandPNG(path, overwrite, createPng)
+					}
+					return nil
+				})
+				checkError(err)
+			}
 		}
 
 		log.Info("Process ran in ", time.Since(startTime))
